@@ -11,14 +11,17 @@
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; background: #f5f5f7; }
     .page { max-width: 720px; margin: 40px auto; padding: 0 16px; }
-    .card { background: #fff; border-radius: 20px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06); margin-bottom: 24px; }
+    /* 扁平卡片：无阴影 */
+    .card { background: #fff; border-radius: 22px; padding: 32px; box-shadow: none; margin-bottom: 24px; }
     .card h1 { font-size: 24px; margin: 0 0 6px; color: #1d1d1f; font-weight: 600; letter-spacing: -.02em; }
     .card .subtitle { color: #86868b; font-size: 14px; margin: 0 0 24px; }
     .checkin-area { text-align: center; padding: 12px 0 4px; }
-    .checkin-btn { width: 160px !important; height: 160px !important; border-radius: 50% !important; font-size: 22px !important; font-weight: 600; box-shadow: 0 8px 24px rgba(64,158,255,.35); }
-    .checkin-btn.done { box-shadow: none; }
+    /* 扁平圆形按钮：去投影，用按压缩放代替 */
+    .checkin-btn { width: 160px !important; height: 160px !important; border-radius: 50% !important; font-size: 22px !important; font-weight: 600; box-shadow: none !important; }
+    .checkin-btn:not(:disabled):active { transform: scale(.95); }
     .status { margin-top: 18px; color: #86868b; font-size: 14px; }
-    .el-button { border-radius: 10px !important; font-weight: 500; }
+    .el-button { border-radius: 12px !important; font-weight: 500; border: none !important; }
+    .el-input__wrapper { border-radius: 12px !important; }
   </style>
 </head>
 <body>
@@ -66,14 +69,14 @@ const app = createApp({
     const formatTime = (t) => t ? String(t).replace('T', ' ').substring(0, 19) : '-';
 
     const loadToday = async () => {
-      const res = await fetch('/api/checkin/today');
-      if (res.status === 401) { location.href = '/login.html'; return; }
+      const res = await api('/api/checkin/today');   // 会话失效时 api() 会提示并跳转登录页
+      if (!res || !res.ok) return;
       const data = await res.json();
       checkedIn.value = data.checkedIn;
     };
     const loadRecords = async () => {
-      const res = await fetch('/api/checkin/records');
-      if (res.status === 401) { location.href = '/login.html'; return; }
+      const res = await api('/api/checkin/records');
+      if (!res || !res.ok) return;
       const data = await res.json();
       records.value = data.records || [];
       total.value = data.total || 0;
@@ -84,18 +87,19 @@ const app = createApp({
       try {
         const params = new URLSearchParams();
         if (remark.value) params.append('remark', remark.value);
-        const res = await fetch('/api/checkin', { method: 'POST', body: params });
-        const data = await res.json();
-        if (res.ok && data.code === 200) {
-          ElementPlus.ElMessage.success('签到消息已发送，正在异步处理...');
-          checkedIn.value = true;
-          // 延迟刷新记录，等消费者落库
-          setTimeout(loadRecords, 1500);
-        } else {
-          ElementPlus.ElMessage.error(data.msg || '签到失败');
+        const res = await api('/api/checkin', { method: 'POST', body: params });
+        if (!res || !res.ok) {
+          if (res) ElementPlus.ElMessage.error('签到失败，请重试');
+          return;
         }
-      } catch (e) {
-        ElementPlus.ElMessage.error('网络错误，请重试');
+        ElementPlus.ElMessage.success('签到消息已发送，正在异步处理...');
+        // 签到走 MQ 异步落库，轮询确认后再刷新记录
+        for (let i = 0; i < 6; i++) {
+          await new Promise(r => setTimeout(r, 800));
+          await loadToday();
+          if (checkedIn.value) break;
+        }
+        loadRecords();
       } finally {
         submitting.value = false;
       }

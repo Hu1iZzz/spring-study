@@ -11,11 +11,16 @@
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
     .login-page { height: 100vh; display: flex; align-items: center; justify-content: center; background: #f5f5f7; }
-    .login-card { width: 380px; background: #fff; border-radius: 20px; padding: 44px 36px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06); }
+    /* 扁平：白卡片直接浮在灰底上，不要投影 */
+    .login-card { width: 380px; background: #fff; border-radius: 24px; padding: 44px 36px; box-shadow: none; }
     .login-card h1 { font-size: 26px; text-align: center; margin: 0 0 8px; color: #1d1d1f; font-weight: 600; letter-spacing: -.02em; }
     .login-card .subtitle { text-align: center; color: #86868b; font-size: 14px; margin: 0 0 28px; }
-    .el-button { border-radius: 10px !important; font-weight: 500; }
-    .el-input__wrapper { border-radius: 10px !important; }
+    .el-button { border-radius: 12px !important; font-weight: 500; border: none !important; }
+    .el-button--primary { background: #0071e3 !important; }
+    .el-button--primary:hover { background: #0077ed !important; }
+    .el-button:active { transform: scale(.97); }
+    .el-input__wrapper { border-radius: 12px !important; box-shadow: 0 0 0 1px rgba(0,0,0,0.14) inset !important; }
+    .el-input__wrapper.is-focus { box-shadow: 0 0 0 1px #0071e3 inset, 0 0 0 4px rgba(0,113,227,0.15) !important; }
   </style>
 </head>
 <body>
