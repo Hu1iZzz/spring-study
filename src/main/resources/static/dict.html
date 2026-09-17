@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>字典管理</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="/common.js"></script>
+</head>
+<body>
+<div id="app">
+  <app-layout>
+    <div class="toolbar"><h2>字典管理</h2></div>
+    <div style="display:flex; gap:20px;">
+      <div class="card" style="flex:0 0 340px;">
+        <div class="card-header"><h2>字典类型</h2><el-button v-if="hasPermission('dict:add')" type="primary" size="small" @click="openTypeCreate">新增</el-button></div>
+        <el-table :data="typeList" v-loading="typeLoading" highlight-current-row @current-change="selectType" size="small" style="width:100%">
+          <el-table-column label="名称" min-width="100"><template #default="{ row }">{{ row.name }}</template></el-table-column>
+          <el-table-column label="编码" min-width="90"><template #default="{ row }">{{ row.code }}</template></el-table-column>
+          <el-table-column label="操作" width="100" align="center">
+            <template #default="{ row }">
+              <el-button v-if="hasPermission('dict:edit')" link type="primary" size="small" @click.stop="openTypeEdit(row)">编辑</el-button>
+              <el-button v-if="hasPermission('dict:delete')" link type="danger" size="small" @click.stop="delType(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <div class="card" style="flex:1;">
+        <div class="card-header"><h2>字典数据{{ currentType ? ' - ' + currentType.name : '' }}</h2>
+          <el-button v-if="hasPermission('dict:add')" type="primary" size="small" @click="openDataCreate" :disabled="!currentType">新增</el-button></div>
+        <el-table :data="dataList" v-loading="dataLoading" stripe style="width:100%">
+          <el-table-column label="标签" min-width="120"><template #default="{ row }">{{ row.label }}</template></el-table-column>
+          <el-table-column label="值" min-width="100"><template #default="{ row }">{{ row.value }}</template></el-table-column>
+          <el-table-column label="排序" width="70" align="center"><template #default="{ row }">{{ row.sortOrder }}</template></el-table-column>
+          <el-table-column label="状态" width="70" align="center">
+            <template #default="{ row }"><el-tag :type="row.status ? 'success' : 'info'" size="small">{{ row.status ? '启用' : '禁用' }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="操作" width="130" align="center">
+            <template #default="{ row }">
+              <el-button v-if="hasPermission('dict:edit')" link type="primary" size="small" @click="openDataEdit(row)">编辑</el-button>
+              <el-button v-if="hasPermission('dict:delete')" link type="danger" size="small" @click="delData(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+
+    <el-dialog v-model="typeDialog" :title="editingTypeId ? '编辑类型' : '新增类型'" width="460px" @closed="resetTypeForm">
+      <el-form ref="typeFormRef" :model="typeForm" :rules="typeRules" label-width="80px">
+        <el-form-item label="名称" prop="name"><el-input v-model="typeForm.name" /></el-form-item>
+        <el-form-item label="编码" prop="code"><el-input v-model="typeForm.code" :disabled="!!editingTypeId" /></el-form-item>
+        <el-form-item label="状态"><el-switch v-model="typeForm.status" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="typeDialog = false">取消</el-button><el-button type="primary" :loading="submitting" @click="submitType">确定</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="dataDialog" :title="editingDataId ? '编辑数据' : '新增数据'" width="460px" @closed="resetDataForm">
+      <el-form ref="dataFormRef" :model="dataForm" :rules="dataRules" label-width="80px">
+        <el-form-item label="标签" prop="label"><el-input v-model="dataForm.label" /></el-form-item>
+        <el-form-item label="值" prop="value"><el-input v-model="dataForm.value" /></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="dataForm.sortOrder" :min="0" /></el-form-item>
+        <el-form-item label="状态"><el-switch v-model="dataForm.status" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="dataDialog = false">取消</el-button><el-button type="primary" :loading="submitting" @click="submitData">确定</el-button></template>
+    </el-dialog>
+  </app-layout>
+</div>
+<script>
+initApp({
+  components: { AppLayout },
+  setup() {
+    const typeList = ref([]);
+    const dataList = ref([]);
+    const typeLoading = ref(false);
+    const dataLoading = ref(false);
+    const submitting = ref(false);
+    const currentType = ref(null);
+
+    const typeDialog = ref(false);
+    const dataDialog = ref(false);
+    const editingTypeId = ref(null);
+    const editingDataId = ref(null);
+    const typeForm = reactive({ name: '', code: '', status: true });
+    const dataForm = reactive({ label: '', value: '', sortOrder: 0, status: true });
+    const typeFormRef = ref(null);
+    const dataFormRef = ref(null);
+    const typeRules = { name: [{ required: true, message: '请输入名称', trigger: 'blur' }], code: [{ required: true, message: '请输入编码', trigger: 'blur' }] };
+    const dataRules = { label: [{ required: true, message: '请输入标签', trigger: 'blur' }], value: [{ required: true, message: '请输入值', trigger: 'blur' }] };
+
+    const loadTypes = async () => {
+      typeLoading.value = true;
+      try {
+        const res = await api('/api/dict/types');
+        if (!res || !res.ok) return;
+        typeList.value = await res.json();
+      } finally { typeLoading.value = false; }
+    };
+
+    const loadData = async (typeId) => {
+      dataLoading.value = true;
+      try {
+        const res = await api(`/api/dict/data/${typeId}`);
+        if (!res || !res.ok) return;
+        dataList.value = await res.json();
+      } finally { dataLoading.value = false; }
+    };
+
+    const selectType = (row) => {
+      currentType.value = row;
+      if (row) loadData(row.id);
+      else dataList.value = [];
+    };
+
+    const resetTypeForm = () => { editingTypeId.value = null; Object.assign(typeForm, { name: '', code: '', status: true }); nextTick(() => typeFormRef.value?.clearValidate()); };
+    const resetDataForm = () => { editingDataId.value = null; Object.assign(dataForm, { label: '', value: '', sortOrder: 0, status: true }); nextTick(() => dataFormRef.value?.clearValidate()); };
+
+    const openTypeCreate = () => { resetTypeForm(); typeDialog.value = true; };
+    const openTypeEdit = (row) => { resetTypeForm(); editingTypeId.value = row.id; Object.assign(typeForm, { name: row.name, code: row.code, status: row.status }); typeDialog.value = true; };
+    const openDataCreate = () => { resetDataForm(); dataDialog.value = true; };
+    const openDataEdit = (row) => { resetDataForm(); editingDataId.value = row.id; Object.assign(dataForm, { label: row.label, value: row.value, sortOrder: row.sortOrder, status: row.status }); dataDialog.value = true; };
+
+    const submitType = () => {
+      typeFormRef.value.validate(async (valid) => {
+        if (!valid) return;
+        submitting.value = true;
+        try {
+          const url = editingTypeId.value ? `/api/dict/types/${editingTypeId.value}` : '/api/dict/types';
+          const method = editingTypeId.value ? 'PUT' : 'POST';
+          const res = await api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(typeForm) });
+          if (!res || !res.ok) throw new Error('保存失败');
+          ElementPlus.ElMessage.success('成功'); typeDialog.value = false; loadTypes();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); } finally { submitting.value = false; }
+      });
+    };
+
+    const submitData = () => {
+      dataFormRef.value.validate(async (valid) => {
+        if (!valid) return;
+        submitting.value = true;
+        try {
+          const body = { ...dataForm, typeId: currentType.value.id };
+          const url = editingDataId.value ? `/api/dict/data/${editingDataId.value}` : '/api/dict/data';
+          const method = editingDataId.value ? 'PUT' : 'POST';
+          const res = await api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (!res || !res.ok) throw new Error('保存失败');
+          ElementPlus.ElMessage.success('成功'); dataDialog.value = false; loadData(currentType.value.id);
+        } catch (e) { ElementPlus.ElMessage.error(e.message); } finally { submitting.value = false; }
+      });
+    };
+
+    const delType = (row) => {
+      ElementPlus.ElMessageBox.confirm(`确定删除字典类型「${row.name}」及其所有数据？`, '提示', { type: 'warning' })
+        .then(async () => { const res = await api(`/api/dict/types/${row.id}`, { method: 'DELETE' }); if (res && res.ok) { ElementPlus.ElMessage.success('已删除'); currentType.value = null; dataList.value = []; loadTypes(); } }).catch(() => {});
+    };
+    const delData = (row) => {
+      ElementPlus.ElMessageBox.confirm(`确定删除「${row.label}」？`, '提示', { type: 'warning' })
+        .then(async () => { const res = await api(`/api/dict/data/${row.id}`, { method: 'DELETE' }); if (res && res.ok) { ElementPlus.ElMessage.success('已删除'); loadData(currentType.value.id); } }).catch(() => {});
+    };
+
+    onMounted(() => loadTypes());
+    return { typeList, dataList, typeLoading, dataLoading, submitting, currentType, typeDialog, dataDialog, editingTypeId, editingDataId, typeForm, dataForm, typeFormRef, dataFormRef, typeRules, dataRules, selectType, resetTypeForm, resetDataForm, openTypeCreate, openTypeEdit, openDataCreate, openDataEdit, submitType, submitData, delType, delData, hasPermission };
+  }
+});
+</script>
+</body>
+</html>

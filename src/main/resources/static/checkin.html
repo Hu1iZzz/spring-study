@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>签到 - 学习平台</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; background: #f5f5f7; }
+    .page { max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 20px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06); margin-bottom: 24px; }
+    .card h1 { font-size: 24px; margin: 0 0 6px; color: #1d1d1f; font-weight: 600; letter-spacing: -.02em; }
+    .card .subtitle { color: #86868b; font-size: 14px; margin: 0 0 24px; }
+    .checkin-area { text-align: center; padding: 12px 0 4px; }
+    .checkin-btn { width: 160px !important; height: 160px !important; border-radius: 50% !important; font-size: 22px !important; font-weight: 600; box-shadow: 0 8px 24px rgba(64,158,255,.35); }
+    .checkin-btn.done { box-shadow: none; }
+    .status { margin-top: 18px; color: #86868b; font-size: 14px; }
+    .el-button { border-radius: 10px !important; font-weight: 500; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="page">
+    <div class="card">
+      <h1>📅 每日签到</h1>
+      <p class="subtitle">签到请求通过 RabbitMQ 异步处理，稍后可在下方记录中看到</p>
+      <div class="checkin-area">
+        <el-button class="checkin-btn" :class="{ done: checkedIn }" type="primary" :disabled="checkedIn || submitting" :loading="submitting" @click="handleCheckIn">
+          {{ checkedIn ? '已签到' : '签 到' }}
+        </el-button>
+        <div class="status" v-if="checkedIn">今天已经签到过了，明天再来吧～</div>
+        <div class="status" v-else>点击按钮完成今日签到</div>
+      </div>
+      <div style="margin-top: 16px; text-align: center">
+        <el-input v-model="remark" placeholder="签到备注（可选）" style="max-width: 360px" clearable />
+      </div>
+    </div>
+
+    <div class="card">
+      <h1>📋 签到记录</h1>
+      <p class="subtitle">共 {{ total }} 条记录（数据由 MQ 消费者异步写入）</p>
+      <el-table :data="records" style="width: 100%" empty-text="暂无签到记录">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column label="签到时间" min-width="180">
+          <template #default="scope">{{ formatTime(scope.row.checkInTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="ip" label="IP" width="140" />
+        <el-table-column prop="remark" label="备注" min-width="160" />
+      </el-table>
+    </div>
+  </div>
+</div>
+<script>
+const { createApp, ref, onMounted } = Vue;
+const app = createApp({
+  setup() {
+    const checkedIn = ref(false);
+    const submitting = ref(false);
+    const remark = ref('');
+    const records = ref([]);
+    const total = ref(0);
+
+    const formatTime = (t) => t ? String(t).replace('T', ' ').substring(0, 19) : '-';
+
+    const loadToday = async () => {
+      const res = await fetch('/api/checkin/today');
+      if (res.status === 401) { location.href = '/login.html'; return; }
+      const data = await res.json();
+      checkedIn.value = data.checkedIn;
+    };
+    const loadRecords = async () => {
+      const res = await fetch('/api/checkin/records');
+      if (res.status === 401) { location.href = '/login.html'; return; }
+      const data = await res.json();
+      records.value = data.records || [];
+      total.value = data.total || 0;
+    };
+
+    const handleCheckIn = async () => {
+      submitting.value = true;
+      try {
+        const params = new URLSearchParams();
+        if (remark.value) params.append('remark', remark.value);
+        const res = await fetch('/api/checkin', { method: 'POST', body: params });
+        const data = await res.json();
+        if (res.ok && data.code === 200) {
+          ElementPlus.ElMessage.success('签到消息已发送，正在异步处理...');
+          checkedIn.value = true;
+          // 延迟刷新记录，等消费者落库
+          setTimeout(loadRecords, 1500);
+        } else {
+          ElementPlus.ElMessage.error(data.msg || '签到失败');
+        }
+      } catch (e) {
+        ElementPlus.ElMessage.error('网络错误，请重试');
+      } finally {
+        submitting.value = false;
+      }
+    };
+
+    onMounted(() => { loadToday(); loadRecords(); });
+    return { checkedIn, submitting, remark, records, total, handleCheckIn, formatTime };
+  }
+});
+for (const [k, c] of Object.entries(ElementPlusIconsVue)) app.component(k, c);
+app.use(ElementPlus);
+app.mount('#app');
+</script>
+</body>
+</html>

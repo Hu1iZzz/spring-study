@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>首页 - 学习平台</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="https://unpkg.com/echarts@5/dist/echarts.min.js"></script>
+  <script src="/common.js"></script>
+  <style>
+    /* ====== 签到日历卡片 ====== */
+    .checkin-card { margin-bottom: 24px; }
+    .checkin-btn { min-width: 96px; }
+    .cal-title { font-size: 16px; font-weight: 600; color: #1d1d1f; }
+    .cal-nav { display: flex; align-items: center; gap: 8px; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 16px 20px 8px; }
+    .cal-week { text-align: center; font-size: 12px; color: #86868b; padding: 4px 0; font-weight: 500; }
+    .cal-cell {
+      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+      font-size: 13px; color: #1d1d1f; border-radius: 10px; cursor: default;
+      transition: background .15s ease;
+    }
+    .cal-cell.blank { visibility: hidden; }
+    .cal-cell.today { box-shadow: inset 0 0 0 2px #0071e3; font-weight: 600; }
+    .cal-cell.checked { background: #34c759; color: #fff; font-weight: 600; }
+    .cal-cell.checked.today { background: #0071e3; }
+    .cal-cell:not(.blank):hover { background: rgba(0,0,0,0.05); }
+    .cal-cell.checked:not(.blank):hover { opacity: .85; }
+    .cal-footer { padding: 10px 20px 16px; font-size: 13px; color: #86868b; }
+    .cal-footer b { color: #34c759; font-weight: 600; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <app-layout>
+    <div class="toolbar"><h2>仪表盘</h2></div>
+    <div class="welcome-stats" style="margin-bottom:24px;">
+      <div class="stat-card">
+        <div class="stat-num" style="color:#0071e3">{{ stats.users }}</div>
+        <div class="stat-label">用户总数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="color:#34c759">{{ stats.roles }}</div>
+        <div class="stat-label">角色总数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="color:#ff9500">{{ stats.menus }}</div>
+        <div class="stat-label">菜单总数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" style="color:#af52de">{{ stats.perms }}</div>
+        <div class="stat-label">权限总数</div>
+      </div>
+    </div>
+    <div class="card checkin-card">
+      <div class="card-header">
+        <h2>📅 每日签到</h2>
+        <div class="cal-nav">
+          <el-button size="small" text @click="changeMonth(-1)"><el-icon><ArrowLeft /></el-icon></el-button>
+          <span class="cal-title">{{ calYear }} 年 {{ calMonth }} 月</span>
+          <el-button size="small" text @click="changeMonth(1)"><el-icon><ArrowRight /></el-icon></el-button>
+          <el-button class="checkin-btn" type="primary" size="small" :loading="checking" :disabled="todayChecked" @click="doCheckIn">
+            {{ todayChecked ? '已签到' : '签到' }}
+          </el-button>
+        </div>
+      </div>
+      <div class="cal-grid">
+        <div class="cal-week" v-for="w in weekdays" :key="w">{{ w }}</div>
+        <div v-for="(cell, i) in calendarCells" :key="i"
+             class="cal-cell"
+             :class="{ blank: cell.blank, today: cell.isToday, checked: cell.checked }">
+          {{ cell.day || '' }}
+        </div>
+      </div>
+      <div class="cal-footer">本月已签到 <b>{{ monthTotal }}</b> 天<span v-if="todayChecked">，今天已打卡 ✅</span></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2>最近30天活跃用户（按角色区分）</h2></div>
+      <div ref="chartRef" style="height:400px; padding:16px;"></div>
+    </div>
+  </app-layout>
+</div>
+<script>
+  initApp({
+    components: { AppLayout },
+    setup() {
+      const stats = reactive({ users: 0, roles: 0, menus: 0, perms: 0 });
+      const chartRef = ref(null);
+
+      /* ====== 签到日历 ====== */
+      const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+      const now = new Date();
+      const calYear = ref(now.getFullYear());
+      const calMonth = ref(now.getMonth() + 1);
+      const checkedDays = ref(new Set());   // 该月已签到的日期，格式 yyyy-MM-dd
+      const todayChecked = ref(false);
+      const checking = ref(false);
+
+      const pad = (n) => String(n).padStart(2, '0');
+      const dateKey = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+      const todayKey = dateKey(now.getFullYear(), now.getMonth() + 1, now.getDate());
+
+      /* 日历格子：周一起始，前置空位 + 当月每天 */
+      const calendarCells = computed(() => {
+        const lead = (new Date(calYear.value, calMonth.value - 1, 1).getDay() + 6) % 7;
+        const daysInMonth = new Date(calYear.value, calMonth.value, 0).getDate();
+        const cells = [];
+        for (let i = 0; i < lead; i++) cells.push({ blank: true });
+        for (let d = 1; d <= daysInMonth; d++) {
+          const key = dateKey(calYear.value, calMonth.value, d);
+          cells.push({ day: d, key, checked: checkedDays.value.has(key), isToday: key === todayKey });
+        }
+        return cells;
+      });
+      const monthTotal = computed(() => checkedDays.value.size);
+
+      /* 查询某月有签到的日期 */
+      const loadCalendar = async () => {
+        try {
+          const res = await api(`/api/checkin/calendar?year=${calYear.value}&month=${calMonth.value}`);
+          if (res && res.ok) {
+            const d = await res.json();
+            checkedDays.value = new Set(d.days || []);
+          }
+        } catch {}
+      };
+
+      /* 查询今天是否已签到（签到走 MQ 异步落库，需要轮询确认） */
+      const loadToday = async () => {
+        try {
+          const res = await api('/api/checkin/today');
+          if (res && res.ok) {
+            const d = await res.json();
+            todayChecked.value = !!d.checkedIn;
+          }
+        } catch {}
+      };
+
+      /* 发起签到：POST 消息进 MQ，消费者异步落库，轮询等待落库完成后刷新日历 */
+      const doCheckIn = async () => {
+        if (checking.value || todayChecked.value) return;
+        checking.value = true;
+        try {
+          const res = await api('/api/checkin', { method: 'POST' });
+          if (!res || !res.ok) {
+            ElementPlus.ElMessage.error('签到请求失败，请重试');
+            return;
+          }
+          ElementPlus.ElMessage.info('签到消息已发送，正在处理...');
+          /* 最多轮询 6 次（约 5 秒），MQ 消费落库有短暂延迟 */
+          for (let i = 0; i < 6; i++) {
+            await new Promise(r => setTimeout(r, 800));
+            await loadToday();
+            if (todayChecked.value) break;
+          }
+          if (todayChecked.value) {
+            ElementPlus.ElMessage.success('签到成功！');
+            await loadCalendar();
+          } else {
+            ElementPlus.ElMessage.warning('签到处理中，MQ 可能未启动，稍后请刷新查看');
+          }
+        } finally {
+          checking.value = false;
+        }
+      };
+
+      /* 上/下月切换 */
+      const changeMonth = (delta) => {
+        let y = calYear.value, m = calMonth.value + delta;
+        if (m < 1) { y--; m = 12; }
+        if (m > 12) { y++; m = 1; }
+        calYear.value = y;
+        calMonth.value = m;
+        loadCalendar();
+      };
+
+      const loadStats = async () => {
+        const endpoints = [
+          ['/api/users?page=0&size=1', 'users', 'totalElements'],
+          ['/api/roles', 'roles', 'length'],
+          ['/api/menus', 'menus', 'length'],
+          ['/api/permissions', 'perms', 'length']
+        ];
+        for (const [url, key, field] of endpoints) {
+          try {
+            const res = await api(url);
+            if (res && res.ok) {
+              const d = await res.json();
+              stats[key] = field === 'length' ? d.length : d[field] || 0;
+            }
+          } catch {}
+        }
+      };
+
+      const loadChart = async () => {
+        try {
+          const res = await api('/api/stats/active-users');
+          if (!res || !res.ok) return;
+          const data = await res.json();
+          const chart = echarts.init(chartRef.value);
+          const colors = ['#0071e3', '#34c759', '#ff9500', '#af52de', '#ff3b30', '#5ac8fa'];
+          chart.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            legend: { top: 4, data: (data.series || []).map(s => s.name) },
+            grid: { left: 48, right: 24, top: 48, bottom: 60 },
+            xAxis: {
+              type: 'category', data: data.dates || [],
+              axisLabel: { rotate: 45, fontSize: 11, color: '#86868b' },
+              axisLine: { lineStyle: { color: 'rgba(0,0,0,0.1)' } }
+            },
+            yAxis: {
+              type: 'value', minInterval: 1,
+              axisLabel: { color: '#86868b' },
+              splitLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } }
+            },
+            series: (data.series || []).map((s, i) => ({
+              name: s.name, type: 'bar', stack: 'total', data: s.data,
+              itemStyle: { borderRadius: [0, 0, 0, 0] },
+              color: colors[i % colors.length]
+            }))
+          });
+          window.addEventListener('resize', () => chart.resize());
+        } catch {}
+      };
+
+      onMounted(async () => {
+        await loadStats();
+        await loadCalendar();   // 当前月签到日历
+        await loadToday();      // 今天是否已签到（控制按钮状态）
+        await nextTick();
+        await loadChart();
+      });
+
+      return { stats, chartRef, weekdays, calYear, calMonth, calendarCells, monthTotal,
+               todayChecked, checking, doCheckIn, changeMonth };
+    }
+  });
+</script>
+</body>
+</html>

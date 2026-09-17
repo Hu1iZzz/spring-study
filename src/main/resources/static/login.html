@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 - 学习平台</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+    .login-page { height: 100vh; display: flex; align-items: center; justify-content: center; background: #f5f5f7; }
+    .login-card { width: 380px; background: #fff; border-radius: 20px; padding: 44px 36px; box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06); }
+    .login-card h1 { font-size: 26px; text-align: center; margin: 0 0 8px; color: #1d1d1f; font-weight: 600; letter-spacing: -.02em; }
+    .login-card .subtitle { text-align: center; color: #86868b; font-size: 14px; margin: 0 0 28px; }
+    .el-button { border-radius: 10px !important; font-weight: 500; }
+    .el-input__wrapper { border-radius: 10px !important; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="login-page">
+    <div class="login-card">
+      <h1>📚 学习平台</h1>
+      <p class="subtitle">登录以继续</p>
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+        <el-form-item label="用户名" prop="username">
+          <el-input v-model="form.username" placeholder="请输入用户名" size="large" :prefix-icon="User" />
+        </el-form-item>
+        <el-form-item label="密码" prop="password">
+          <el-input v-model="form.password" type="password" placeholder="请输入密码" size="large" show-password :prefix-icon="Lock" />
+        </el-form-item>
+        <el-button type="primary" size="large" style="width:100%; margin-top:8px" :loading="loading" @click="handleLogin">登 录</el-button>
+      </el-form>
+    </div>
+  </div>
+</div>
+<script>
+const { createApp, ref, reactive } = Vue;
+const app = createApp({
+  setup() {
+    const form = reactive({ username: '', password: '' });
+    const loading = ref(false);
+    const formRef = ref(null);
+    const rules = {
+      username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+      password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+    };
+    const handleLogin = () => {
+      formRef.value.validate((valid) => {
+        if (!valid) return;
+        loading.value = true;
+        const f = document.createElement('form');
+        f.method = 'POST'; f.action = '/api/auth/login';
+        for (const [k, v] of Object.entries(form)) { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i); }
+        document.body.appendChild(f); f.submit();
+      });
+    };
+    if (new URLSearchParams(location.search).get('error') === 'true') {
+      setTimeout(() => ElementPlus.ElMessage.error('用户名或密码错误'), 100);
+    }
+    return { form, loading, formRef, rules, handleLogin, User: ElementPlusIconsVue.User, Lock: ElementPlusIconsVue.Lock };
+  }
+});
+for (const [k, c] of Object.entries(ElementPlusIconsVue)) app.component(k, c);
+app.use(ElementPlus);
+app.mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>系统设置</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="/common.js"></script>
+</head>
+<body>
+<div id="app">
+  <app-layout>
+    <div class="toolbar">
+      <h2>系统设置</h2>
+      <el-button v-if="hasPermission('config:add')" type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增</el-button>
+    </div>
+    <div class="card">
+      <el-table :data="configList" v-loading="loading" stripe style="width:100%">
+        <el-table-column label="ID" width="60" align="center"><template #default="{ row }">{{ row.id }}</template></el-table-column>
+        <el-table-column label="参数名称" min-width="120"><template #default="{ row }">{{ row.name }}</template></el-table-column>
+        <el-table-column label="编码" min-width="120"><template #default="{ row }">{{ row.code }}</template></el-table-column>
+        <el-table-column label="参数值" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ row.value || '-' }}</template></el-table-column>
+        <el-table-column label="描述" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ row.description || '-' }}</template></el-table-column>
+        <el-table-column label="操作" width="150" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="hasPermission('config:edit')" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="hasPermission('config:delete')" link type="danger" @click="del(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑配置' : '新增配置'" width="480px" @closed="resetForm">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+        <el-form-item label="参数名称" prop="name"><el-input v-model="form.name" /></el-form-item>
+        <el-form-item label="编码" prop="code"><el-input v-model="form.code" :disabled="!!editingId" /></el-form-item>
+        <el-form-item label="参数值"><el-input v-model="form.value" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="描述"><el-input v-model="form.description" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">确定</el-button>
+      </template>
+    </el-dialog>
+  </app-layout>
+</div>
+<script>
+initApp({
+  components: { AppLayout },
+  setup() {
+    const configList = ref([]);
+    const loading = ref(false);
+    const submitting = ref(false);
+    const dialogVisible = ref(false);
+    const editingId = ref(null);
+    const form = reactive({ name: '', code: '', value: '', description: '' });
+    const formRef = ref(null);
+    const rules = {
+      name: [{ required: true, message: '请输入参数名称', trigger: 'blur' }],
+      code: [{ required: true, message: '请输入编码', trigger: 'blur' }]
+    };
+
+    const load = async () => {
+      loading.value = true;
+      try {
+        const res = await api('/api/configs');
+        if (!res || !res.ok) return;
+        configList.value = await res.json();
+      } finally { loading.value = false; }
+    };
+
+    const resetForm = () => {
+      editingId.value = null;
+      Object.assign(form, { name: '', code: '', value: '', description: '' });
+      nextTick(() => formRef.value?.clearValidate());
+    };
+
+    const openCreate = () => { resetForm(); dialogVisible.value = true; };
+    const openEdit = (row) => {
+      resetForm();
+      editingId.value = row.id;
+      Object.assign(form, { name: row.name, code: row.code, value: row.value, description: row.description });
+      dialogVisible.value = true;
+    };
+
+    const submit = () => {
+      formRef.value.validate(async (valid) => {
+        if (!valid) return;
+        submitting.value = true;
+        try {
+          const url = editingId.value ? `/api/configs/${editingId.value}` : '/api/configs';
+          const method = editingId.value ? 'PUT' : 'POST';
+          const res = await api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+          if (!res || !res.ok) throw new Error('保存失败');
+          ElementPlus.ElMessage.success(editingId.value ? '修改成功' : '新增成功');
+          dialogVisible.value = false;
+          load();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); }
+        finally { submitting.value = false; }
+      });
+    };
+
+    const del = (row) => {
+      ElementPlus.ElMessageBox.confirm(`确定删除配置「${row.name}」？`, '提示', { type: 'warning' })
+        .then(async () => {
+          const res = await api(`/api/configs/${row.id}`, { method: 'DELETE' });
+          if (res && res.ok) { ElementPlus.ElMessage.success('已删除'); load(); }
+        }).catch(() => {});
+    };
+
+    onMounted(() => load());
+    return { configList, loading, submitting, dialogVisible, editingId, form, formRef, rules, resetForm, openCreate, openEdit, submit, del, hasPermission };
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>角色管理</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="/common.js"></script>
+</head>
+<body>
+<div id="app">
+  <app-layout>
+    <div class="toolbar">
+      <h2>角色管理</h2>
+      <el-button v-if="hasPermission('role:add')" type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增</el-button>
+    </div>
+    <div class="card">
+      <el-table :data="roleList" v-loading="loading" stripe style="width:100%">
+        <el-table-column label="ID" width="60" align="center"><template #default="{ row }">{{ row.id }}</template></el-table-column>
+        <el-table-column label="角色名称" min-width="120"><template #default="{ row }">{{ row.name }}</template></el-table-column>
+        <el-table-column label="编码" min-width="100"><template #default="{ row }">{{ row.code }}</template></el-table-column>
+        <el-table-column label="描述" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ row.description || '-' }}</template></el-table-column>
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }"><el-tag :type="row.status ? 'success' : 'info'" size="small">{{ row.status ? '启用' : '禁用' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="hasPermission('role:perm')" link type="primary" @click="openPermAssign(row)">分配权限</el-button>
+            <el-button v-if="hasPermission('role:edit')" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="hasPermission('role:delete')" link type="danger" @click="del(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑角色' : '新增角色'" width="480px" @closed="resetForm">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+        <el-form-item label="角色名称" prop="name"><el-input v-model="form.name" /></el-form-item>
+        <el-form-item label="编码" prop="code"><el-input v-model="form.code" :disabled="!!editingId" /></el-form-item>
+        <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="状态"><el-switch v-model="form.status" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="submitting" @click="submit">确定</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="permDialogVisible" :title="`分配权限 - ${permAssignRole?.name || ''}`" width="540px">
+      <el-tabs>
+        <el-tab-pane label="菜单权限">
+          <el-tree ref="menuTreeRef" :data="menuTreeData" :props="{ label: 'name', children: 'children' }" node-key="id" show-checkbox default-expand-all />
+        </el-tab-pane>
+        <el-tab-pane label="按钮权限">
+          <el-tree ref="permTreeRef" :data="permTreeData" :props="{ label: 'name', children: 'children' }" node-key="id" show-checkbox default-expand-all />
+        </el-tab-pane>
+      </el-tabs>
+      <template #footer><el-button @click="permDialogVisible = false">取消</el-button><el-button type="primary" :loading="submitting" @click="submitPerms">确定</el-button></template>
+    </el-dialog>
+  </app-layout>
+</div>
+<script>
+initApp({
+  components: { AppLayout },
+  setup() {
+    const roleList = ref([]);
+    const loading = ref(false);
+    const submitting = ref(false);
+    const dialogVisible = ref(false);
+    const editingId = ref(null);
+    const form = reactive({ name: '', code: '', description: '', status: true });
+    const formRef = ref(null);
+    const rules = {
+      name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
+      code: [{ required: true, message: '请输入编码', trigger: 'blur' }]
+    };
+
+    const permDialogVisible = ref(false);
+    const permAssignRole = ref(null);
+    const menuTreeData = ref([]);
+    const permTreeData = ref([]);
+    const menuTreeRef = ref(null);
+    const permTreeRef = ref(null);
+
+    const buildTree = (list) => {
+      const map = {};
+      const roots = [];
+      list.forEach(p => { map[p.id] = { ...p, children: [] }; });
+      list.forEach(p => {
+        if (p.parentId && map[p.parentId]) map[p.parentId].children.push(map[p.id]);
+        else roots.push(map[p.id]);
+      });
+      return roots;
+    };
+
+    const load = async () => {
+      loading.value = true;
+      try {
+        const res = await api('/api/roles');
+        if (!res || !res.ok) return;
+        roleList.value = await res.json();
+      } finally { loading.value = false; }
+    };
+
+    const resetForm = () => {
+      editingId.value = null;
+      Object.assign(form, { name: '', code: '', description: '', status: true });
+      nextTick(() => formRef.value?.clearValidate());
+    };
+
+    const openCreate = () => { resetForm(); dialogVisible.value = true; };
+    const openEdit = (row) => {
+      resetForm();
+      editingId.value = row.id;
+      Object.assign(form, { name: row.name, code: row.code, description: row.description, status: row.status });
+      dialogVisible.value = true;
+    };
+
+    const submit = () => {
+      formRef.value.validate(async (valid) => {
+        if (!valid) return;
+        submitting.value = true;
+        try {
+          const url = editingId.value ? `/api/roles/${editingId.value}` : '/api/roles';
+          const method = editingId.value ? 'PUT' : 'POST';
+          const res = await api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+          if (!res || !res.ok) throw new Error('保存失败');
+          ElementPlus.ElMessage.success(editingId.value ? '修改成功' : '新增成功');
+          dialogVisible.value = false;
+          load();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); }
+        finally { submitting.value = false; }
+      });
+    };
+
+    const del = (row) => {
+      ElementPlus.ElMessageBox.confirm(`确定删除角色「${row.name}」？`, '提示', { type: 'warning' })
+        .then(async () => {
+          const res = await api(`/api/roles/${row.id}`, { method: 'DELETE' });
+          if (res && res.ok) { ElementPlus.ElMessage.success('已删除'); load(); }
+        }).catch(() => {});
+    };
+
+    const openPermAssign = async (row) => {
+      permAssignRole.value = row;
+
+      const menuRes = await api('/api/menus');
+      if (menuRes && menuRes.ok) {
+        const allMenus = await menuRes.json();
+        menuTreeData.value = buildTree(allMenus);
+      }
+
+      const permRes = await api('/api/permissions');
+      if (permRes && permRes.ok) {
+        const allPerms = await permRes.json();
+        permTreeData.value = buildTree(allPerms);
+      }
+
+      const roleMenuRes = await api(`/api/menus/role/${row.id}`);
+      if (roleMenuRes && roleMenuRes.ok) {
+        const menuIds = await roleMenuRes.json();
+        nextTick(() => menuTreeRef.value?.setCheckedKeys(menuIds));
+      }
+
+      const rolePermRes = await api(`/api/permissions/role/${row.id}`);
+      if (rolePermRes && rolePermRes.ok) {
+        const permIds = await rolePermRes.json();
+        nextTick(() => permTreeRef.value?.setCheckedKeys(permIds));
+      }
+
+      permDialogVisible.value = true;
+    };
+
+    const submitPerms = async () => {
+      submitting.value = true;
+      try {
+        const menuIds = [...menuTreeRef.value.getCheckedKeys(), ...menuTreeRef.value.getHalfCheckedKeys()];
+        const menuRes = await api(`/api/menus/role/${permAssignRole.value.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ menuIds })
+        });
+        if (!menuRes || !menuRes.ok) throw new Error('菜单权限分配失败');
+
+        const permIds = [...permTreeRef.value.getCheckedKeys(), ...permTreeRef.value.getHalfCheckedKeys()];
+        const permRes = await api(`/api/permissions/role/${permAssignRole.value.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ permissionIds: permIds })
+        });
+        if (!permRes || !permRes.ok) throw new Error('按钮权限分配失败');
+
+        ElementPlus.ElMessage.success('权限分配成功');
+        permDialogVisible.value = false;
+      } catch (e) { ElementPlus.ElMessage.error(e.message); }
+      finally { submitting.value = false; }
+    };
+
+    onMounted(() => load());
+    return { roleList, loading, submitting, dialogVisible, editingId, form, formRef, rules, permDialogVisible, permAssignRole, menuTreeData, permTreeData, menuTreeRef, permTreeRef, resetForm, openCreate, openEdit, submit, del, openPermAssign, submitPerms, hasPermission };
+  }
+});
+</script>
+</body>
+</html>

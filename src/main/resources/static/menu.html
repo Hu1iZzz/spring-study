@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>菜单管理</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="/common.js"></script>
+</head>
+<body>
+<div id="app">
+  <app-layout>
+    <div class="toolbar">
+      <h2>菜单管理</h2>
+      <el-button v-if="hasPermission('menu:add')" type="primary" @click="openCreate(null)"><el-icon><Plus /></el-icon>&nbsp;新增顶级菜单</el-button>
+    </div>
+    <div class="card">
+      <el-table :data="treeData" v-loading="loading" row-key="id" border default-expand-all style="width:100%">
+        <el-table-column label="菜单名称" min-width="180"><template #default="{ row }">{{ row.name }}</template></el-table-column>
+        <el-table-column label="路由路径" min-width="140"><template #default="{ row }">{{ row.path || '-' }}</template></el-table-column>
+        <el-table-column label="图标" width="80" align="center"><template #default="{ row }">{{ row.icon || '-' }}</template></el-table-column>
+        <el-table-column label="排序" width="70" align="center"><template #default="{ row }">{{ row.sortOrder }}</template></el-table-column>
+        <el-table-column label="状态" width="70" align="center">
+          <template #default="{ row }"><el-tag :type="row.status ? 'success' : 'info'" size="small">{{ row.status ? '启用' : '禁用' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" align="center">
+          <template #default="{ row }">
+            <el-button v-if="hasPermission('menu:add')" link type="primary" @click="openCreate(row)">添加子菜单</el-button>
+            <el-button v-if="hasPermission('menu:edit')" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="hasPermission('menu:delete')" link type="danger" @click="del(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑菜单' : '新增菜单'" width="480px" @closed="resetForm">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
+        <el-form-item label="名称" prop="name"><el-input v-model="form.name" /></el-form-item>
+        <el-form-item label="路由路径"><el-input v-model="form.path" placeholder="如 /users.html，父菜单留空" /></el-form-item>
+        <el-form-item label="图标"><el-input v-model="form.icon" placeholder="Element Plus 图标名，如 User" /></el-form-item>
+        <el-form-item label="父菜单">
+          <el-tree-select v-model="form.parentId" :data="parentOptions" :props="{ label: 'name', value: 'id', children: 'children' }" check-strictly default-expand-all clearable placeholder="顶级菜单" />
+        </el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="form.sortOrder" :min="0" /></el-form-item>
+        <el-form-item label="状态"><el-switch v-model="form.status" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="submitting" @click="submit">确定</el-button></template>
+    </el-dialog>
+  </app-layout>
+</div>
+<script>
+initApp({
+  components: { AppLayout },
+  setup() {
+    const menuList = ref([]);
+    const treeData = ref([]);
+    const loading = ref(false);
+    const submitting = ref(false);
+    const dialogVisible = ref(false);
+    const editingId = ref(null);
+    const form = reactive({ name: '', path: '', icon: '', parentId: null, sortOrder: 0, status: true });
+    const formRef = ref(null);
+    const rules = { name: [{ required: true, message: '请输入菜单名称', trigger: 'blur' }] };
+
+    const buildTree = (list) => {
+      const map = {};
+      const roots = [];
+      list.forEach(d => { map[d.id] = { ...d, children: [] }; });
+      list.forEach(d => {
+        if (d.parentId && map[d.parentId]) map[d.parentId].children.push(map[d.id]);
+        else roots.push(map[d.id]);
+      });
+      return roots;
+    };
+
+    const parentOptions = computed(() => buildTree(menuList.value));
+
+    const load = async () => {
+      loading.value = true;
+      try {
+        const res = await api('/api/menus');
+        if (!res || !res.ok) return;
+        menuList.value = await res.json();
+        treeData.value = buildTree(menuList.value);
+      } finally { loading.value = false; }
+    };
+
+    const resetForm = () => {
+      editingId.value = null;
+      Object.assign(form, { name: '', path: '', icon: '', parentId: null, sortOrder: 0, status: true });
+      nextTick(() => formRef.value?.clearValidate());
+    };
+
+    const openCreate = (parent) => {
+      resetForm();
+      if (parent) form.parentId = parent.id;
+      dialogVisible.value = true;
+    };
+    const openEdit = (row) => {
+      resetForm();
+      editingId.value = row.id;
+      Object.assign(form, { name: row.name, path: row.path || '', icon: row.icon || '', parentId: row.parentId || null, sortOrder: row.sortOrder, status: row.status });
+      dialogVisible.value = true;
+    };
+
+    const submit = () => {
+      formRef.value.validate(async (valid) => {
+        if (!valid) return;
+        submitting.value = true;
+        try {
+          const body = { ...form, parentId: form.parentId || 0 };
+          const url = editingId.value ? `/api/menus/${editingId.value}` : '/api/menus';
+          const method = editingId.value ? 'PUT' : 'POST';
+          const res = await api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (!res || !res.ok) throw new Error('保存失败');
+          ElementPlus.ElMessage.success(editingId.value ? '修改成功' : '新增成功');
+          dialogVisible.value = false;
+          load();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); }
+        finally { submitting.value = false; }
+      });
+    };
+
+    const del = (row) => {
+      ElementPlus.ElMessageBox.confirm(`确定删除菜单「${row.name}」？`, '提示', { type: 'warning' })
+        .then(async () => {
+          const res = await api(`/api/menus/${row.id}`, { method: 'DELETE' });
+          if (res && res.ok) { ElementPlus.ElMessage.success('已删除'); load(); }
+        }).catch(() => {});
+    };
+
+    onMounted(() => load());
+    return { treeData, loading, submitting, dialogVisible, editingId, form, formRef, rules, parentOptions, resetForm, openCreate, openEdit, submit, del, hasPermission };
+  }
+});
+</script>
+</body>
+</html>

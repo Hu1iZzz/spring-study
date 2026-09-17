@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>资产管理</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="/common.js"></script>
+</head>
+<body>
+<div id="app">
+  <app-layout>
+    <div class="toolbar">
+      <h2>资产管理</h2>
+      <el-button v-if="hasPermission('asset:add')" type="primary" @click="openCreate"><el-icon><Plus /></el-icon>&nbsp;新增</el-button>
+    </div>
+    <div class="card">
+      <el-table :data="assetList" v-loading="loading" stripe style="width:100%">
+        <el-table-column label="编号" width="120"><template #default="{ row }">{{ row.code }}</template></el-table-column>
+        <el-table-column label="名称" min-width="120"><template #default="{ row }">{{ row.name }}</template></el-table-column>
+        <el-table-column label="类型" width="90" align="center">
+          <template #default="{ row }"><el-tag size="small">{{ row.category === 'IT' ? 'IT资产' : '固定资产' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="规格型号" min-width="120" show-overflow-tooltip><template #default="{ row }">{{ row.type || '-' }}</template></el-table-column>
+        <el-table-column label="状态" width="90" align="center">
+          <template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="购置日期" width="110"><template #default="{ row }">{{ row.purchaseDate || '-' }}</template></el-table-column>
+        <el-table-column label="价格" width="100" align="right"><template #default="{ row }">{{ row.purchasePrice != null ? '¥' + row.purchasePrice : '-' }}</template></el-table-column>
+        <el-table-column label="操作" width="150" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="hasPermission('asset:edit')" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="hasPermission('asset:delete')" link type="danger" @click="del(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="pager">
+        <el-pagination background layout="total, prev, pager, next" :total="total"
+          v-model:current-page="query.page" v-model:page-size="query.size" @current-change="load" />
+      </div>
+    </div>
+
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑资产' : '新增资产'" width="540px" @closed="resetForm">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+        <el-form-item label="编号" prop="code"><el-input v-model="form.code" :disabled="!!editingId" /></el-form-item>
+        <el-form-item label="名称" prop="name"><el-input v-model="form.name" /></el-form-item>
+        <el-form-item label="类型" prop="category">
+          <el-radio-group v-model="form.category"><el-radio label="IT">IT资产</el-radio><el-radio label="FIXED">固定资产</el-radio></el-radio-group>
+        </el-form-item>
+        <el-form-item label="规格型号"><el-input v-model="form.type" /></el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="form.status" style="width:100%">
+            <el-option label="空闲" value="IDLE" /><el-option label="使用中" value="IN_USE" />
+            <el-option label="维修中" value="REPAIR" /><el-option label="已报废" value="SCRAPPED" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="购置日期"><el-date-picker v-model="form.purchaseDate" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+        <el-form-item label="购置价格"><el-input-number v-model="form.purchasePrice" :min="0" :precision="2" style="width:100%" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="form.remarks" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">确定</el-button>
+      </template>
+    </el-dialog>
+  </app-layout>
+</div>
+<script>
+initApp({
+  components: { AppLayout },
+  setup() {
+    const assetList = ref([]);
+    const loading = ref(false);
+    const submitting = ref(false);
+    const dialogVisible = ref(false);
+    const editingId = ref(null);
+    const total = ref(0);
+    const query = reactive({ page: 1, size: 10 });
+    const form = reactive({ code: '', name: '', category: 'IT', type: '', status: 'IDLE', purchaseDate: null, purchasePrice: null, remarks: '' });
+    const formRef = ref(null);
+    const rules = {
+      code: [{ required: true, message: '请输入编号', trigger: 'blur' }],
+      name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
+      category: [{ required: true, message: '请选择类型', trigger: 'change' }]
+    };
+
+    const statusText = (s) => ({ IDLE: '空闲', IN_USE: '使用中', REPAIR: '维修中', SCRAPPED: '已报废' }[s] || s);
+    const statusType = (s) => ({ IDLE: 'info', IN_USE: 'success', REPAIR: 'warning', SCRAPPED: 'danger' }[s] || 'info');
+
+    const load = async () => {
+      loading.value = true;
+      try {
+        const res = await api(`/api/assets?page=${query.page - 1}&size=${query.size}`);
+        if (!res || !res.ok) return;
+        const d = await res.json();
+        assetList.value = d.content;
+        total.value = d.totalElements;
+      } finally { loading.value = false; }
+    };
+
+    const resetForm = () => {
+      editingId.value = null;
+      Object.assign(form, { code: '', name: '', category: 'IT', type: '', status: 'IDLE', purchaseDate: null, purchasePrice: null, remarks: '' });
+      nextTick(() => formRef.value?.clearValidate());
+    };
+
+    const openCreate = () => { resetForm(); dialogVisible.value = true; };
+    const openEdit = (row) => {
+      resetForm();
+      editingId.value = row.id;
+      Object.assign(form, { code: row.code, name: row.name, category: row.category, type: row.type, status: row.status, purchaseDate: row.purchaseDate, purchasePrice: row.purchasePrice, remarks: row.remarks });
+      dialogVisible.value = true;
+    };
+
+    const submit = () => {
+      formRef.value.validate(async (valid) => {
+        if (!valid) return;
+        submitting.value = true;
+        try {
+          const url = editingId.value ? `/api/assets/${editingId.value}` : '/api/assets';
+          const method = editingId.value ? 'PUT' : 'POST';
+          const res = await api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+          if (!res || !res.ok) throw new Error('保存失败');
+          ElementPlus.ElMessage.success(editingId.value ? '修改成功' : '新增成功');
+          dialogVisible.value = false;
+          load();
+        } catch (e) { ElementPlus.ElMessage.error(e.message); }
+        finally { submitting.value = false; }
+      });
+    };
+
+    const del = (row) => {
+      ElementPlus.ElMessageBox.confirm(`确定删除资产「${row.name}」？`, '提示', { type: 'warning' })
+        .then(async () => {
+          const res = await api(`/api/assets/${row.id}`, { method: 'DELETE' });
+          if (res && res.ok) { ElementPlus.ElMessage.success('已删除'); load(); }
+        }).catch(() => {});
+    };
+
+    onMounted(() => load());
+    return { assetList, loading, submitting, dialogVisible, editingId, total, query, form, formRef, rules, statusText, statusType, resetForm, openCreate, openEdit, submit, del, load, hasPermission };
+  }
+});
+</script>
+</body>
+</html>

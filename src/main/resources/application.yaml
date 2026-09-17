@@ -1,3 +1,69 @@
 spring:
   application:
     name: spring-study
+
+  datasource:
+    # 使用 MariaDB 官方驱动
+    driver-class-name: org.mariadb.jdbc.Driver
+    url: jdbc:mariadb://localhost:3306/springstudy?useSSL=false&useUnicode=true&characterEncoding=UTF-8
+    username: root
+    password: root
+
+    # HikariCP 连接池配置
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: MyHikariPool
+      register-mbeans: true
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 20
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 3000ms
+
+  # RabbitMQ 消息队列
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    # 消费者监听器配置
+    listener:
+      simple:
+        acknowledge-mode: auto   # 消费成功自动确认
+        concurrency: 1
+        max-concurrency: 5
+        retry:
+          enabled: true
+          initial-interval: 2000ms
+          max-retries: 3
+
+# MQTT 消息（学习用）。默认连 EMQX 公共测试 broker，无需安装；
+# 本地练习时可换成 tcp://localhost:1883（Docker 启动 EMQX / Mosquitto）
+mqtt:
+  broker-url: tcp://broker.emqx.io:1883
+  client-id: spring-study-client   # 同一 broker 上 client-id 必须唯一，重复会被踢下线
+  username: ""                     # 公共 broker 可留空；本地 broker 按需填写
+  password: ""
+  default-topic: demo/topic        # 默认订阅/发布的主题
+  qos: 1                           # 0 最多一次 / 1 至少一次 / 2 恰好一次
+
+# 企业微信群机器人推送（群设置 -> 群机器人 -> 添加，把 Webhook 地址里的 key 填到这里）
+wechat:
+  webhook-key: ""
