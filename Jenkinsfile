@@ -1,4 +1,4 @@
-// spring-study 自动部署流水线
+// spring-study  自动部署流水线
 // 触发方式：Jenkins 每分钟轮询本地仓库（file:///repo），有新提交自动执行
 pipeline {
     agent any
