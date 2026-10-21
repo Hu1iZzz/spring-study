@@ -1,11 +1,18 @@
-// spring-study  自动部署流水线
+// spring-study 自动部署流水线（外置 Tomcat + D 盘挂载版）
 // 触发方式：Jenkins 每分钟轮询本地仓库（file:///repo），有新提交自动执行
+//
+// 与旧版（java -jar 镜像内嵌 war）的区别：
+// - 应用容器是官方 tomcat:11-jre17，webapps 目录 bind-mount 到宿主机 D:/docker-data/spring-study/webapps
+// - Jenkins 容器把同一宿主机目录挂载为 /webapps，部署 = 覆盖 ROOT.war + docker restart
+// - 不再执行 docker build，不再删除/重建应用容器
 pipeline {
     agent any
 
     environment {
-        APP_IMAGE     = 'spring-study'
-        APP_CONTAINER = 'spring-study-app'
+        // Jenkins 容器内路径：/repo 是仓库挂载；/webapps 与应用容器的 webapps 是同一个宿主机目录
+        WAR_FILE       = '/repo/target/study-0.0.1-SNAPSHOT.war'
+        WEBAPPS        = '/webapps'
+        APP_CONTAINER  = 'spring-study-app'
     }
 
     stages {
@@ -15,25 +22,18 @@ pipeline {
             }
         }
 
-        stage('构建镜像') {
+        stage('替换 ROOT.war') {
             steps {
-                sh 'docker build -t $APP_IMAGE:latest .'
+                // 连同 Tomcat 上次解压的 ROOT 目录一起清掉，确保重启后按新 war 重新展开
+                sh 'rm -rf $WEBAPPS/ROOT $WEBAPPS/ROOT.war'
+                sh 'cp $WAR_FILE $WEBAPPS/ROOT.war'
             }
         }
 
         stage('重启应用容器') {
             steps {
-                // MariaDB / Redis / RabbitMQ 跑在宿主机容器上，从应用容器内用 host.docker.internal 访问
-                sh '''
-                    docker rm -f $APP_CONTAINER 2>/dev/null || true
-                    docker run -d --name $APP_CONTAINER --restart unless-stopped \
-                      -p 8080:8080 \
-                      -e TZ=Asia/Shanghai \
-                      -e "SPRING_DATASOURCE_URL=jdbc:mariadb://host.docker.internal:3306/springstudy?useSSL=false&useUnicode=true&characterEncoding=UTF-8" \
-                      -e "SPRING_DATA_REDIS_HOST=host.docker.internal" \
-                      -e "SPRING_RABBITMQ_HOST=host.docker.internal" \
-                      $APP_IMAGE:latest
-                '''
+                // MariaDB / Redis / RabbitMQ 跑在宿主机容器上，应用容器通过 host.docker.internal 访问
+                sh 'docker restart $APP_CONTAINER'
             }
         }
 
@@ -42,7 +42,7 @@ pipeline {
                 sh '''
                     for i in $(seq 1 60); do
                       code=$(curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:8080/actuator/health || true)
-                      if [ "$code" != "000" ]; then echo "应用已启动 (HTTP $code)"; exit 0; fi
+                      if [ "$code" = "200" ] || [ "$code" = "302" ]; then echo "应用已启动 (HTTP $code)"; exit 0; fi
                       sleep 2
                     done
                     echo "健康检查超时"; exit 1
