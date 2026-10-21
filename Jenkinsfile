@@ -1,16 +1,16 @@
 // spring-study 自动部署流水线（外置 Tomcat + D 盘挂载版）
-// 触发方式：Jenkins 每分钟轮询本地仓库（file:///repo），有新提交自动执行
+// 触发方式：Jenkins 每分钟轮询本地仓库，有新提交自动执行
 //
-// 与旧版（java -jar 镜像内嵌 war）的区别：
-// - 应用容器是官方 tomcat:11-jre17，webapps 目录 bind-mount 到宿主机 D:/docker-data/spring-study/webapps
-// - Jenkins 容器把同一宿主机目录挂载为 /webapps，部署 = 覆盖 ROOT.war + docker restart
-// - 不再执行 docker build，不再删除/重建应用容器
+// 部署方式：应用容器是官方 tomcat:11-jre17，webapps 目录 bind-mount 到宿主机
+// D:/docker-data/spring-study/webapps，Jenkins 容器把同一目录挂载为 /webapps。
+// 部署 = 停容器 → 覆盖 ROOT.war → 起容器，不再 docker build / 删除重建容器。
 pipeline {
     agent any
 
     environment {
-        // Jenkins 容器内路径：/repo 是仓库挂载；/webapps 与应用容器的 webapps 是同一个宿主机目录
-        WAR_FILE       = '/repo/target/study-0.0.1-SNAPSHOT.war'
+        // Jenkins 构建的 workspace 就是 job 的检出目录，war 在其 target/ 下（相对路径）
+        WAR_FILE       = 'target/study-0.0.1-SNAPSHOT.war'
+        // 与应用容器 /usr/local/tomcat/webapps 是同一个宿主机目录（D:/docker-data/spring-study/webapps）
         WEBAPPS        = '/webapps'
         APP_CONTAINER  = 'spring-study-app'
     }
@@ -24,26 +24,29 @@ pipeline {
 
         stage('替换 ROOT.war') {
             steps {
-                // 连同 Tomcat 上次解压的 ROOT 目录一起清掉，确保重启后按新 war 重新展开
-                sh 'rm -rf $WEBAPPS/ROOT $WEBAPPS/ROOT.war'
-                sh 'cp $WAR_FILE $WEBAPPS/ROOT.war'
+                // 必须先停 Tomcat 再换文件：Tomcat 后台热部署线程会在 cp 后立刻解压 war，
+                // 若此时 restart 打断它，会留下半成品 ROOT/ 目录，且目录时间戳比 war 新，
+                // 下次启动时 Tomcat 会跳过解压直接用残骸（表现为 404）
+                sh 'docker stop $APP_CONTAINER'
+                sh 'rm -rf $WEBAPPS/ROOT $WEBAPPS/ROOT.war && cp $WAR_FILE $WEBAPPS/ROOT.war'
             }
         }
 
-        stage('重启应用容器') {
+        stage('启动应用容器') {
             steps {
                 // MariaDB / Redis / RabbitMQ 跑在宿主机容器上，应用容器通过 host.docker.internal 访问
-                sh 'docker restart $APP_CONTAINER'
+                sh 'docker start $APP_CONTAINER'
             }
         }
 
         stage('健康检查') {
             steps {
+                // Spring Boot 外置部署启动约 2~3 分钟，最多等 5 分钟
                 sh '''
-                    for i in $(seq 1 60); do
+                    for i in $(seq 1 100); do
                       code=$(curl -s -o /dev/null -w "%{http_code}" http://host.docker.internal:8080/actuator/health || true)
                       if [ "$code" = "200" ] || [ "$code" = "302" ]; then echo "应用已启动 (HTTP $code)"; exit 0; fi
-                      sleep 2
+                      sleep 3
                     done
                     echo "健康检查超时"; exit 1
                 '''
