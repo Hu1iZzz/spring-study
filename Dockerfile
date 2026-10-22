@@ -3,7 +3,9 @@
 # 当前部署方式（Jenkinsfile）：
 #   应用容器直接使用官方 tomcat:11-jre17 镜像创建，
 #   宿主机 D:/docker-data/spring-study/webapps 挂载为容器内 /usr/local/tomcat/webapps，
-#   部署 = 覆盖 webapps/ROOT.war + docker restart spring-study-app。
+#   部署 = docker stop → 覆盖 webapps/ROOT.war → docker start
+#   （不要用 docker restart：cp 后 Tomcat 后台热部署会立刻解压 war，被 restart 打断
+#    会留下半成品 ROOT/ 目录，下次启动时 Tomcat 跳过解压直接用残骸，表现为 404）
 #
 # 若要回到镜像化部署，可执行：
 #   docker build -t spring-study:latest .

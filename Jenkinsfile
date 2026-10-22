@@ -1,5 +1,5 @@
 // spring-study 自动部署流水线（外置 Tomcat + D 盘挂载版）
-// 触发方式：Jenkins 每分钟轮询本地仓库，有新提交自动执行
+// 触发方式：Jenkins 每分钟轮询 GitHub 远程仓库（master 分支），push 新提交自动执行
 //
 // 部署方式：应用容器是官方 tomcat:11-jre17，webapps 目录 bind-mount 到宿主机
 // D:/docker-data/spring-study/webapps，Jenkins 容器把同一目录挂载为 /webapps。
